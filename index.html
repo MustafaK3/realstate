@@ -98,6 +98,24 @@ header select{font-size:16px;max-width:160px;min-height:46px}
 .toast.show{display:flex}
 .toast button{background:var(--on-accent);color:var(--accent);border:0;border-radius:10px;padding:12px 18px;font:700 16px/1 inherit;font-family:inherit;cursor:pointer}
 .big .wrap,.big .sheet{zoom:1.25}
+:root{--ease:cubic-bezier(.2,0,0,1);--dur:300ms}
+.ios{--ease:cubic-bezier(.32,.72,0,1);--dur:420ms}
+.android{--ease:cubic-bezier(.2,0,0,1);--dur:300ms}
+.row{transition:height var(--dur) var(--ease),opacity calc(var(--dur)*.7) var(--ease),margin var(--dur) var(--ease)}
+.row.out{height:0!important;opacity:0;margin-bottom:0}
+.card.snap{transition:transform var(--dur) var(--ease)}
+button,.chip,.btn,.fab{transition:transform 160ms var(--ease),opacity 160ms var(--ease),filter 160ms var(--ease),background-color var(--dur) var(--ease)}
+.ios button:active{transform:scale(.96);opacity:.8}
+.android button:active{filter:brightness(.92);transform:scale(.98)}
+.card.flash{animation:flash 800ms var(--ease)}
+@keyframes flash{from{background:color-mix(in srgb,var(--c) 22%,var(--surface))}to{background:var(--surface)}}
+@keyframes sheetup{from{transform:translateY(100%)}to{transform:none}}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+.sheet.show{animation:sheetup var(--dur) var(--ease)}
+.scrim.show{animation:fadein var(--dur) var(--ease)}
+.toast.show{animation:sheetup var(--dur) var(--ease)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.need{margin-top:8px;font-size:16px}
 </style>
 </head>
 <body>
@@ -130,6 +148,7 @@ const KEY="pipeline-leads-v1";
 const now=()=>new Date().toISOString();
 const uid=()=>Math.random().toString(36).slice(2,9);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const ago=t=>{try{const d=Math.floor((Date.now()-new Date(t).getTime())/864e5);return d<=0?"today":d===1?"yesterday":d+" days ago"}catch(e){return ""}};
 const fmt=t=>{try{return new Date(t).toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}catch(e){return ""}};
 
 function seed(){return [
@@ -155,7 +174,7 @@ function render(){
   $("agentFilter").innerHTML='<option value="all">All agents</option>'+ag.map(a=>`<option ${a===S.agent?"selected":""}>${esc(a)}</option>`).join("");
   $("chips").innerHTML=`<button class="chip" data-stage="all" aria-pressed="${S.stage==="all"}">All <b>${v.length}</b></button>`+
     STAGES.map((s,i)=>`<button class="chip" style="--c:${s[2]}" data-stage="${i}" aria-pressed="${S.stage===i}"><i></i>${s[1]} <b>${v.filter(l=>l.stage===i).length}</b></button>`).join("");
-  const shown=v.filter(l=>S.stage==="all"||l.stage===S.stage).sort((a,b)=>a.stage-b.stage);
+  const shown=v.filter(l=>S.stage==="all"||l.stage===S.stage);
   $("hint").style.display=(S.hintGone||!shown.length)?"none":"block";
   $("list").innerHTML=shown.length?shown.map(card).join(""):`<div class="empty">No leads here yet.<br>Tap “Add a new lead” below to start.</div>`;
 }
@@ -164,11 +183,12 @@ function card(l){
   const prev=STAGES[l.stage-1],next=STAGES[l.stage+1];
   return `<div class="row" data-id="${l.id}">
    <div class="under"><span class="uL" style="color:#fff">${next?"→ "+next[0]:""}</span><span class="uR">${prev?prev[0]+" ←":""}</span></div>
-   <div class="card" style="--c:${s[2]}">
+   <div class="card${S.flash===l.id?" flash":""}" style="--c:${s[2]}">
     <div class="top"><div><div class="name">${esc(l.name)}</div><div class="meta">${esc(l.agent||"Unassigned")}${l.phone?" · "+esc(l.phone):""}</div></div>
      </div>
     <div class="stage">Stage: ${esc(s[0])}</div>
     <div class="bar">${STAGES.map((_,i)=>`<i class="${i<=l.stage?"on":""}"></i>`).join("")}</div>
+    ${l.need?`<div class="need"><b>Needs:</b> ${esc(l.need)}</div>`:""}${(l.attempts||[]).length?`<div class="meta">Follow-up attempts: ${l.attempts.length} · last ${ago(l.attempts[l.attempts.length-1])}</div>`:""}
     <div class="mv">${prev?`<button data-act="back">← Back to ${esc(prev[1])}</button>`:""}${next?`<button class="go" data-act="fwd">Move to ${esc(next[1])} →</button>`:`<div class="meta">✓ Deal closed. Congratulations!</div>`}</div>
     ${l.tags.length?`<div class="tags">${l.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div>`:""}
     ${last?`<div class="note">${esc(last.text)}</div>`:""}
@@ -181,7 +201,7 @@ function move(id,d){
 }
 
 /* swipe */
-let drag=null;
+let drag=null;let busy=false;
 const list=$("list");
 list.addEventListener("pointerdown",e=>{
   if(e.target.closest("button"))return;
@@ -211,7 +231,7 @@ function endDrag(){
   const {c,dx,id,lock}=drag;drag=null;
   if(!lock){S.open=id;openSheet(id);return}
   c.classList.add("snap");
-  if(Math.abs(dx)>90&&move(id,dx>0?1:-1)){S.hintGone=true;c.style.transform=`translateX(${dx>0?"110%":"-110%"})`;setTimeout(render,180)}
+  if(Math.abs(dx)>90&&move(id,dx>0?1:-1)){S.hintGone=true;busy=true;c.style.transform=`translateX(${dx>0?"110%":"-110%"})`;setTimeout(()=>{busy=false;render()},220)}
   else c.style.transform="";
 }
 list.addEventListener("pointerup",endDrag);
@@ -219,7 +239,7 @@ list.addEventListener("pointercancel",()=>{if(drag){drag.c.classList.add("snap")
 list.addEventListener("click",e=>{
   const b=e.target.closest("button[data-act]");if(!b)return;
   const id=b.closest(".row").dataset.id;
-  if(move(id,b.dataset.act==="fwd"?1:-1)){S.hintGone=true;render()}
+  moveRow(id,b.dataset.act==="fwd"?1:-1)
 });
 
 $("chips").addEventListener("click",e=>{
@@ -231,6 +251,20 @@ function toast(msg,fn){const t=$("toast");t.innerHTML=`<span>${esc(msg)}</span><
 $("helpOk").addEventListener("click",()=>{S.hintGone=true;try{localStorage.setItem("pipeline-help-v1","1")}catch(e){}render()});
 $("helpBtn").addEventListener("click",()=>{S.hintGone=false;try{localStorage.removeItem("pipeline-help-v1")}catch(e){}render();window.scrollTo(0,0)});
 const rootEl=document.documentElement;
+const ua=navigator.userAgent||"";
+const isIOS=/iPhone|iPad|iPod/.test(ua)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+rootEl.classList.add(isIOS?"ios":"android");
+function moveRow(id,d){
+  if(busy)return;
+  const l=leads.find(x=>x.id===id);if(!l)return;
+  const n=l.stage+d;if(n<0||n>=STAGES.length)return;
+  busy=true;
+  const leaves=S.stage!=="all";
+  const row=document.querySelector(`.row[data-id="${id}"]`);
+  const dur=parseFloat(getComputedStyle(rootEl).getPropertyValue("--dur"))||300;
+  if(leaves&&row){row.style.height=row.offsetHeight+"px";row.getBoundingClientRect();row.classList.add("out")}
+  setTimeout(()=>{move(id,d);S.hintGone=true;S.flash=id;render();busy=false;setTimeout(()=>{if(S.flash===id)S.flash=null},900)},leaves?dur:0);
+}
 try{if(localStorage.getItem("pipeline-big")==="1")rootEl.classList.add("big")}catch(e){}
 $("big").addEventListener("click",()=>{rootEl.classList.toggle("big");try{localStorage.setItem("pipeline-big",rootEl.classList.contains("big")?"1":"")}catch(e){}});
 
@@ -243,6 +277,12 @@ $("add").addEventListener("click",()=>{
   const l={id:uid(),name:"",phone:"",agent:S.agent==="all"?"Me":S.agent,stage:S.stage==="all"?0:S.stage,tags:[],notes:[]};
   leads.push(l);save();openSheet(l.id,true);
 });
+function attBlock(l){
+  const a=l.attempts||[],n=a.length;
+  return `<label for="f-att">Follow-up attempts: ${n}${n?" (last "+ago(a[n-1])+")":""}</label>
+  <div class="inl"><input id="f-att" placeholder="What happened? e.g. left voicemail" autocomplete="off"><button class="btn pri" data-s="att">Log attempt</button></div>
+  ${n?`<div style="margin-top:8px"><button class="btn" data-s="attundo">Undo last attempt</button></div>`:""}`;
+}
 function openSheet(id,isNew){
   const l=leads.find(x=>x.id===id);if(!l)return;
   S.open=id;
@@ -251,11 +291,14 @@ function openSheet(id,isNew){
   <label for="f-name">Name</label><input id="f-name" value="${esc(l.name)}" placeholder="Client name" autocomplete="off">
   <div class="two"><div><label for="f-phone">Phone</label><input id="f-phone" type="tel" value="${esc(l.phone)}"></div>
   <div><label for="f-agent">Assigned agent</label><input id="f-agent" list="agentList" value="${esc(l.agent)}"><datalist id="agentList">${agents().map(a=>`<option value="${esc(a)}">`).join("")}</datalist></div></div>
+  <label for="f-need">What they need</label>
+  <textarea id="f-need" rows="2" placeholder="Budget, area, bedrooms, timeline, loan type…">${esc(l.need||"")}</textarea>
   <label>Stage (tap to change)</label>
   <div class="stagebtns">${STAGES.map((s,i)=>`<button class="chip" style="--c:${s[2]}" data-set="${i}" aria-pressed="${l.stage===i}"><i></i>${s[0]}</button>`).join("")}</div>
   <label for="f-tag">Tags (short labels, like “hot lead” or “needs loan”)</label>
   <div class="tags" style="margin:0 0 8px">${l.tags.map((t,i)=>`<span class="tag">${esc(t)}<button data-rm="${i}" aria-label="Remove ${esc(t)}">✕</button></span>`).join("")}</div>
   <div class="inl"><input id="f-tag" placeholder="Add a tag, e.g. hot lead" autocomplete="off"><button class="btn" data-s="tag">Add</button></div>
+  ${attBlock(l)}
   <label for="f-note">Notes (calls, next steps, anything to remember)</label>
   <textarea id="f-note" rows="3" placeholder="Call summary, next steps, details…"></textarea>
   <div style="margin-top:8px"><button class="btn pri" data-s="note">Save note</button></div>
@@ -268,6 +311,7 @@ sheet.addEventListener("input",e=>{
   const l=leads.find(x=>x.id===S.open);if(!l)return;
   if(e.target.id==="f-name")l.name=e.target.value;
   if(e.target.id==="f-phone")l.phone=e.target.value;
+  if(e.target.id==="f-need")l.need=e.target.value;
   if(e.target.id==="f-agent")l.agent=e.target.value.trim();
   save();
 });
@@ -277,6 +321,7 @@ function addTag(l){
 }
 sheet.addEventListener("keydown",e=>{
   if(e.key==="Enter"&&e.target.id==="f-tag"){e.preventDefault();addTag(leads.find(x=>x.id===S.open))}
+  if(e.key==="Enter"&&e.target.id==="f-att"){e.preventDefault();sheet.querySelector('[data-s="att"]').click()}
 });
 sheet.addEventListener("click",e=>{
   const l=leads.find(x=>x.id===S.open);if(!l)return;
@@ -285,6 +330,8 @@ sheet.addEventListener("click",e=>{
   else if(b.dataset.s==="tag")addTag(l);
   else if(b.dataset.rm!==undefined){l.tags.splice(+b.dataset.rm,1);save();openSheet(l.id)}
   else if(b.dataset.set!==undefined){const n=+b.dataset.set;if(n!==l.stage){l.stage=n;l.notes.push({t:now(),text:"Moved to "+STAGES[n][0]});save();openSheet(l.id)}}
+  else if(b.dataset.s==="att"){const a=l.attempts||(l.attempts=[]);a.push(now());const v=$("f-att").value.trim();l.notes.push({t:now(),text:"Follow-up attempt #"+a.length+(v?": "+v:"")});save();openSheet(l.id)}
+  else if(b.dataset.s==="attundo"){if(l.attempts&&l.attempts.length){l.attempts.pop();l.notes.push({t:now(),text:"Removed last follow-up attempt"});save();openSheet(l.id)}}
   else if(b.dataset.s==="note"){const v=$("f-note").value.trim();if(v){l.notes.push({t:now(),text:v});save();openSheet(l.id)}}
   else if(b.dataset.s==="del"){if(b.dataset.confirm){leads=leads.filter(x=>x.id!==l.id);save();closeSheet()}else{b.dataset.confirm=1;b.textContent="Tap again to permanently delete"}}
 });
